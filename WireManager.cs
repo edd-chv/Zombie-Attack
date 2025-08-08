@@ -82,36 +82,6 @@ namespace WiresMiniGame
             public Color color = new(255, 0, 205, 1.0f);
             public bool IsUsed = false;
         }
-        private class AnchorPosition
-        {
-            public Vector3 position;
-            public bool IsUsed = false;
-
-            public static Vector3 Free(List<AnchorPosition> apb)
-            {
-                while (true)
-                {
-                    int randIndex = Random.Range(0, apb.Count);
-                    if (!apb[randIndex].IsUsed)
-                    {
-                        apb[randIndex].IsUsed = true;
-                        return apb[randIndex].position;
-                    }
-
-                    if (apb[randIndex].IsUsed)
-                    {
-                        apb.Remove(apb[randIndex]);
-                    }
-
-                    if (apb.Count == 0)
-                    {
-                        Debug.Log("apb list is empty");
-                        return Vector3.zero;
-                    }
-                }
-            }
-        }
-
         private class SameColor
         {
             internal SameColor()
@@ -142,7 +112,6 @@ namespace WiresMiniGame
         [SerializeField] private Color[] _color;
 
         private float _AnchorDeltaPointConnection;
-        private List<AnchorPosition> _anchorPosBool;
         private ColorWire[] _colorWires;
         private int _countConnected = 0;
         private float _widthLine;
@@ -178,19 +147,6 @@ namespace WiresMiniGame
             _widthLine = 1.3f / 100 * _scaleWire;
             _AnchorDeltaPointConnection = -1.8f / 100 * _scaleWire;
 
-            _anchorPosBool = new();
-            for (int i = 0; i < _anchorTransform.Count; i++)
-            { 
-                _anchorPosBool.Add(new());
-                _anchorPosBool[i].position = _anchorTransform[i].position;
-                _anchorPosBool[i].IsUsed = false;
-            }
-
-            if (_anchorPosBool.Count < _anchorTransform.Count)
-            {
-                Debug.LogError("Count not enough");
-            }
-
             _colorWires = new ColorWire[_color.Length];
             for (int i = 0; i < _colorWires.Length; i++)
             {
@@ -209,7 +165,7 @@ namespace WiresMiniGame
                 GameObject pww = Instantiate(_prefabWanderingWire);
 
                 pl.transform.position = _lineTransform[i].position;
-                paw.transform.position = AnchorPosition.Free(_anchorPosBool);
+                paw.transform.position = GetFreePosition(_anchorTransform);
                 pww.transform.position = _wanderingTransform[i].position;
 
                 wire[i] = new(pl, paw, pww, parent: _canvasRectTr, multipleScale:_scaleWire, stepZ: _positionStepZ);
@@ -251,6 +207,26 @@ namespace WiresMiniGame
                         _allWiresConnected.Invoke();
                     }
                 });
+            }
+        }
+
+        private Vector3 GetFreePosition(List<Transform> t)
+        {
+            while (true)
+            {
+                int randIndex = Random.Range(0, t.Count);
+
+                if (t[randIndex].gameObject.activeSelf)
+                {
+                    t[randIndex].gameObject.SetActive(false);
+                    return t[randIndex].position;
+                }
+
+                if (t.Count == 0)
+                {
+                    Debug.Log("Transform list is empty");
+                    return Vector3.zero;
+                }
             }
         }
     }
