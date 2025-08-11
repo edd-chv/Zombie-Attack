@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using TMPro;
+using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.Events;
 
@@ -17,52 +19,99 @@ namespace WiresMiniGame
             }
         }
     }
+    public class ColorWire
+    {
+        public Color color = new(255, 0, 205, 1.0f);
+        public bool IsFree = true;
+
+        public ColorWire() { }
+        public ColorWire(Color c)
+        {
+            color = c;
+            IsFree = true;
+        }
+        public static void BusyReset(ref ColorWire[] cw)
+        {
+            for (int i = 0; i < cw.Length; i++)
+            {
+                cw[i].IsFree = true;
+                //Debug.Log($"BusyReset: Color: {cw[i].color}, IsFree: {cw[i].IsFree}");
+            }
+        }
+        public static ColorWire GetRandomColor(ref ColorWire[] array)
+        {
+            for (int i = 0; i < array.Length; i++)
+            {
+                int index = Random.Range(0, array.Length);
+                if (array[index].IsFree)
+                {
+                    array[index].IsFree = false;
+                    return array[index];
+                }
+            }
+            return new();
+        }
+    }
 
     public class WireManager : MonoBehaviour
     {
+        public ColorWireVisualize _cWV;
         [SerializeField] private UnityEvent _allWiresConnected = new UnityEvent();
         private class Wire
         {
-            private GameObject _line;
-            private GameObject _wanderingWire;
-            private GameObject _anchor;
-            private float StepZ
+            private Transform _lineTr;
+            private Transform _wanderingWireTr;
+            private Transform _anchorTr;
+
+            private LineConnection _line;
+            private WanderingWireDrag _wanderingWire;
+            private AnchorWire _anchor;
+
+            internal float _stepZ
             {
                 set
                 {
-                    SetPositionZ(_line.transform, value);
-                    SetPositionZ(_wanderingWire.transform, value);
-                    SetPositionZ(_anchor.transform, value);
+                    SetPositionZ(_lineTr, value);
+                    SetPositionZ(_wanderingWireTr, value);
+                    SetPositionZ(_anchorTr, value);
                 }
             }
-            private Transform Parent
+            internal Transform _parent
             {
                 set
                 {
-                    SetParent(_line.transform, value);
-                    SetParent(_wanderingWire.transform, value);
-                    SetParent(_anchor.transform, value);
+                    SetParent(_lineTr, value);
+                    SetParent(_wanderingWireTr, value);
+                    SetParent(_anchorTr, value);
                 }
             }
-            private float MultipleScale
+            internal float _multipleScale
             {
                 set
                 {
-                    SetScaleMultiple(_wanderingWire.transform, value);
-                    SetScaleMultiple(_anchor.transform, value);
+                    SetScaleMultiple(_wanderingWireTr, value);
+                    SetScaleMultiple(_anchorTr, value);
+                    _lineTr.localScale = Vector3.one;
                 }
             }
-            public Wire(GameObject line, GameObject anchor, GameObject wanderingWire, Transform parent, float multipleScale, float stepZ)
+            internal Color _updateColor
+            {
+                set 
+                {
+                    _line.SingleColor(value);
+                    _anchor.Color = value;
+                    _wanderingWire.UpdateColor(value);
+                }
+            }
+            public Wire(LineConnection line, AnchorWire anchor, WanderingWireDrag wanderingWire)
             {
                 _line = line;
                 _anchor = anchor;
                 _wanderingWire = wanderingWire;
 
-                Parent = parent;
-                MultipleScale = multipleScale;
-                StepZ = stepZ;
-
-                _line.transform.localScale = Vector3.one;
+                _lineTr = line.transform;
+                _anchorTr = anchor.transform;
+                _wanderingWireTr = wanderingWire.transform;
             }
             private void SetParent(Transform t, Transform parent)
             {
@@ -75,23 +124,6 @@ namespace WiresMiniGame
             private void SetPositionZ(Transform t, float stepZ)
             {
                 t.position = new Vector3(t.position.x, t.position.y, t.position.z + stepZ);
-            }
-        }
-        private class ColorWire
-        {
-            public Color color = new(255, 0, 205, 1.0f);
-            public bool IsUsed = false;
-        }
-        private class SameColor
-        {
-            internal SameColor()
-            {
-
-            }
-
-            public void SetColor(Color c)
-            {
-
             }
         }
 
@@ -111,6 +143,8 @@ namespace WiresMiniGame
         [SerializeField] private List<Transform> _lineTransform;
         [SerializeField] private Color[] _color;
 
+        private Wire[] _wire;
+        private WanderingWireDrag[] _wanderingWireDrag;
         private float _AnchorDeltaPointConnection;
         private ColorWire[] _colorWires;
         private int _countConnected = 0;
@@ -140,77 +174,91 @@ namespace WiresMiniGame
 
         private void Awake()
         {
-            Wire[] wire = new Wire[_wanderingTransform.Count];
-            ColorWire cw = new();
-            List<AnchorWire> _anchors = new();
+            _colorWires = new ColorWire[_color.Length];
+            for (int i = 0; i < _colorWires.Length; i++)
+            {
+                _colorWires[i] = new(_color[i]);
+            }
+
+            _cWV.Init(ref _colorWires);
+
+            float linePosStep = 0;
+
+            _wire = new Wire[_wanderingTransform.Count];
+            _wanderingWireDrag = new WanderingWireDrag[_wanderingTransform.Count];
 
             _widthLine = 1.3f / 100 * _scaleWire;
             _AnchorDeltaPointConnection = -1.8f / 100 * _scaleWire;
 
-            _colorWires = new ColorWire[_color.Length];
-            for (int i = 0; i < _colorWires.Length; i++)
-            {
-                _colorWires[i] = new()
-                {
-                    color = _color[i],
-                    IsUsed = false
-                };
-            }
-
-            float linePosStep = 0;
             for (int i = 0; i < _wanderingTransform.Count; i++)
             {
                 GameObject pl = Instantiate(_prefabLine);
+                pl.name = $"line {i}";
+
                 GameObject paw = Instantiate(_prefabAnchorWire);
+                paw.name = $"anchor {i}";
+
                 GameObject pww = Instantiate(_prefabWanderingWire);
+                pww.name = $"wandering {i}";
 
-                pl.transform.position = _lineTransform[i].position;
-                paw.transform.position = GetFreePosition(_anchorTransform);
-                pww.transform.position = _wanderingTransform[i].position;
-
-                wire[i] = new(pl, paw, pww, parent: _canvasRectTr, multipleScale:_scaleWire, stepZ: _positionStepZ);
-
-                for (int j = 0; j < _colorWires.Length; j++)
-                {
-                    cw = _colorWires[Random.Range(0, _colorWires.Length)];
-                    if (!cw.IsUsed)
-                    {
-                        cw.IsUsed = true;
-                        j = _colorWires.Length;
-                    }
-                }
+                pl.transform.position = SetPosition(_lineTransform[i].position);
+                paw.transform.position = SetPosition(GetFreePositionRandom(_anchorTransform));
+                pww.transform.position = SetPosition(_wanderingTransform[i].position);
 
                 AnchorWire aw = paw.GetComponent<AnchorWire>();
-                aw.Init(_AnchorDeltaPointConnection, cw.color);
-                _anchors.Add(aw);
-
                 WanderingWireDrag wwd = pww.GetComponent<WanderingWireDrag>();
-                wwd.Init(_canvasRectTr, _overlapRadius, cw.color, _sparklesConnected, _flashScale);
-
                 WanderingWireFixator wwf = pww.GetComponent<WanderingWireFixator>();
+                LineConnection lc = pl.GetComponent<LineConnection>();
+
+                aw.Init(_AnchorDeltaPointConnection);
+                aw.WasConnect.AddListener(() => 
+                {
+                    _countConnected++;
+
+                    if (_countConnected == _anchorTransform.Count)
+                    {
+                        _allWiresConnected.Invoke();
+                        _countConnected = 0;
+                    }
+                });
+
+                wwd.Init(_canvasRectTr, _overlapRadius, _sparklesConnected, _flashScale);
+                _wanderingWireDrag[i] = wwd;
+
                 wwf.Init(pl.GetComponent<RectTransform>());
 
-                LineConnection lc = pl.GetComponent<LineConnection>();
-                lc.Init(pww.GetComponent<RectTransform>(), cw.color, _widthLine);
+                lc.Init(pww.GetComponent<RectTransform>(), _widthLine);
+
+                _wire[i] = new(lc, aw, wwd)
+                {
+                    _parent = _canvasRectTr,
+                    _multipleScale = _scaleWire,
+                    _updateColor = ColorWire.GetRandomColor(ref _colorWires).color
+                };
 
                 linePosStep += _positionStepZ;
             }
 
-            for (int i = 0; i < _anchors.Count; i++)
+            Vector3 SetPosition(Vector3 pos)
             {
-                _anchors[i].WasConnect.AddListener(() =>
-                {
-                    _countConnected++;
-
-                    if (_countConnected == _anchors.Count)
-                    {
-                        _allWiresConnected.Invoke();
-                    }
-                });
+                return pos + new Vector3(0, 0, linePosStep);
             }
         }
 
-        private Vector3 GetFreePosition(List<Transform> t)
+        public void ResetWires()
+        {
+            ColorWire.BusyReset(ref _colorWires);
+
+            for (int i = 0; i < _wanderingWireDrag.Length; i++)
+            {
+                _wanderingWireDrag[i].ResetPosition();
+
+                ColorWire c = ColorWire.GetRandomColor(ref _colorWires);
+                _wire[i]._updateColor = c.color;
+            }
+        }
+
+        private Vector3 GetFreePositionRandom(List<Transform> t)
         {
             while (true)
             {
